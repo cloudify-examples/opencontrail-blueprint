@@ -1,0 +1,247 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.5/types.yaml
+  - plugin:cloudify-opencontrail-plugin?version=1.0.5.dev1
+
+inputs:
+  opencontrail_user:
+    type: string
+    default: { get_secret: opencontrail_user }
+
+  opencontrail_password:
+    type: string
+    default: { get_secret: opencontrail_password }
+
+  opencontrail_tenant:
+    type: string
+    default: { get_secret: opencontrail_tenant }
+
+  opencontrail_ip:
+    type: string
+    default: { get_secret: opencontrail_ip }
+
+  opencontrail_port:
+    type: string
+    default: { get_secret: opencontrail_port }
+
+  mgmt_network_name:
+    type: string
+    default: 'management_network'
+
+  mgmt_subnet_cidr:
+    type: string
+    default: '192.168.0.0/24'
+
+  mgmt_ip:
+    type: string
+    default: '192.168.0.2'
+
+  left_network_name:
+    type: string
+    default: 'left_network'
+
+  left_subnet_cidr:
+    type: string
+    default: '192.168.1.0/24'
+
+  left_ip:
+    type: string
+    default: '192.168.1.2'
+
+  right_network_name:
+    type: string
+    default:  'right_network'
+
+  right_subnet_cidr:
+    type: string
+    default: '192.168.2.0/24'
+
+  right_ip:
+    type: string
+    default: '192.168.2.2'
+
+  service_template_name:
+    type: string
+    default: template1
+
+  service_instance_name:
+    type: string
+    default: instance1
+
+  port_tuple_name:
+    type: string
+    default: tuple1
+
+dsl_definitions:
+  api_configs: &api_configs
+    - user: { get_input: opencontrail_user }
+      password: { get_input: opencontrail_password }
+      tenant: { get_input: opencontrail_tenant }
+      ip: { get_input: opencontrail_ip }
+      port: { get_input: opencontrail_port }
+
+
+node_templates:
+
+  mgmt_network:
+    type: cloudify.nodes.opencontrail.VirtualNetwork
+    properties:
+      api_configs: *api_configs
+      name: { get_input: mgmt_network_name }
+      subnet_cidr: { get_input: mgmt_subnet_cidr }
+
+  left_network:
+    type: cloudify.nodes.opencontrail.VirtualNetwork
+    properties:
+      api_configs: *api_configs
+      name: { get_input: left_network_name }
+      subnet_cidr: { get_input: left_subnet_cidr }
+      route_target: ~
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: mgmt_network
+
+  right_network:
+    type: cloudify.nodes.opencontrail.VirtualNetwork
+    properties:
+      api_configs: *api_configs
+      name: { get_input: right_network_name }
+      subnet_cidr: { get_input: right_subnet_cidr }
+      route_target: ~
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: left_network
+
+  mgmt_interface:
+    type: cloudify.nodes.opencontrail.VirtualMachineInterface
+    properties:
+      api_configs: *api_configs
+    relationships:
+      - type: cloudify.relationships.connected_to
+        target: mgmt_network
+
+  left_interface:
+    type: cloudify.nodes.opencontrail.VirtualMachineInterface
+    properties:
+      api_configs: *api_configs
+    relationships:
+      - type: cloudify.relationships.connected_to
+        target: left_network
+      - type: cloudify.relationships.depends_on
+        target: mgmt_interface
+
+  right_interface:
+    type: cloudify.nodes.opencontrail.VirtualMachineInterface
+    properties:
+      api_configs: *api_configs
+    relationships:
+      - type: cloudify.relationships.connected_to
+        target: right_network
+      - type: cloudify.relationships.depends_on
+        target: left_interface
+
+  mgmt_instance_ip:
+    type: cloudify.nodes.opencontrail.InstanceIP
+    properties:
+      api_configs: *api_configs
+      ip: { get_input: mgmt_ip }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: mgmt_network
+      - type: cloudify.relationships.depends_on
+        target: mgmt_interface
+
+  left_instance_ip:
+    type: cloudify.nodes.opencontrail.InstanceIP
+    properties:
+      api_configs: *api_configs
+      ip: { get_input: left_ip }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: left_network
+      - type: cloudify.relationships.depends_on
+        target: left_interface
+
+  right_instance_ip:
+    type: cloudify.nodes.opencontrail.InstanceIP
+    properties:
+      api_configs: *api_configs
+      ip: { get_input: right_ip }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: right_network
+      - type: cloudify.relationships.depends_on
+        target: right_interface
+
+  service_template:
+    type: cloudify.nodes.opencontrail.ServiceTemplate
+    properties:
+      api_configs: *api_configs
+      name: { get_input: service_template_name }
+      service_mode: 'in-network'
+      service_type: 'firewall'
+      interface_types:
+        - 'management'
+        - 'left'
+        - 'right'
+      service_virtualization_type: 'virtual-machine'
+
+  service_instance:
+    type: cloudify.nodes.opencontrail.ServiceInstance
+    properties:
+      api_configs: *api_configs
+      name: { get_input: service_instance_name }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: service_template
+      - type: cloudify.relationships.opencontrail.service_instance_uses_virtual_network
+        target: mgmt_network
+      - type: cloudify.relationships.opencontrail.service_instance_uses_ipstance_ip
+        target: mgmt_instance_ip
+        source_interfaces:
+          cloudify.interfaces.relationship_lifecycle:
+            preconfigure:
+              inputs:
+                interface_type: 'management'
+      - type: cloudify.relationships.opencontrail.service_instance_uses_virtual_network
+        target: left_network
+      - type: cloudify.relationships.opencontrail.service_instance_uses_ipstance_ip
+        target: left_instance_ip
+        source_interfaces:
+          cloudify.interfaces.relationship_lifecycle:
+            preconfigure:
+              inputs:
+                interface_type: 'left'
+      - type: cloudify.relationships.opencontrail.service_instance_uses_virtual_network
+        target: right_network
+      - type: cloudify.relationships.opencontrail.service_instance_uses_ipstance_ip
+        target: right_instance_ip
+        source_interfaces:
+          cloudify.interfaces.relationship_lifecycle:
+            preconfigure:
+              inputs:
+                interface_type: 'right'
+
+  port_tuple:
+    type: cloudify.nodes.opencontrail.PortTuple
+    properties:
+      api_configs: *api_configs
+      name: { get_input: port_tuple_name }
+    relationships:
+      - type: cloudify.relationships.contained_in
+        target: service_instance
+      - type: cloudify.relationships.opencontrail.port_tuple_uses_virtual_machine_interface
+        target: mgmt_interface
+      - type: cloudify.relationships.opencontrail.port_tuple_uses_virtual_machine_interface
+        target: left_interface
+      - type: cloudify.relationships.opencontrail.port_tuple_uses_virtual_machine_interface
+        target: right_interface
+
+capabilities:
+  service_instance:
+    value: { get_attribute: [service_instance, object_reference] }
+  service_template:
+    value: { get_attribute: [service_template, object_reference] }
+  port_tuple:
+    value: { get_attribute: [port_tuple, object_reference] }

@@ -1,0 +1,100 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.5/types.yaml
+  - plugin:cloudify-opencontrail-plugin
+
+
+inputs:
+  opencontrail_user:
+    type: string
+    default: { get_secret: opencontrail_user }
+
+  opencontrail_password:
+    type: string
+    default: { get_secret: opencontrail_password }
+
+  opencontrail_tenant:
+    type: string
+    default: { get_secret: opencontrail_tenant }
+
+  opencontrail_ip:
+    type: string
+    default: { get_secret: opencontrail_ip }
+
+  opencontrail_port:
+    type: string
+    default: { get_secret: opencontrail_port }
+
+  service_id:
+    type: string
+    default: 'cfy_opencontrail_agg_resources'
+
+  subnet_cidr:
+    type: string
+    default: '10.238.0.0/24'
+
+  route_target:
+    type: string
+    default: '65500:3800'
+
+  as_number:
+    type: string
+    default: '65500'
+
+  mac:
+    type: string
+    default: '52:54:00:d5:42:ea'
+
+  ip:
+    type: string
+    default: '10.238.0.4'
+
+  vr_name:
+    type: string
+    default: 'vr1'
+
+  pif_name:
+    type: string
+    default: 'eth2'
+
+  vlan:
+    type: integer
+    default: 3800
+
+dsl_definitions:
+  api_configs: &api_configs
+    - user: { get_input: opencontrail_user }
+      password: { get_input: opencontrail_password }
+      tenant: { get_input: opencontrail_tenant }
+      ip: { get_input: opencontrail_ip }
+      port: { get_input: opencontrail_port }
+
+node_templates:
+  service:
+    type: cloudify.nodes.opencontrail.Service
+    properties:
+      api_configs: *api_configs
+      name: { get_input: service_id }
+      subnet_cidr: { get_input: subnet_cidr }
+      route_target: { get_input: route_target }
+      vr_name: { get_input: vr_name }
+      pif_name: { get_input: pif_name }
+      vlan: { get_input: vlan }
+
+  service_endpoint_1:
+    type: cloudify.nodes.opencontrail.ServiceEndpoint
+    properties:
+      api_configs: *api_configs
+      mac: { get_input: mac }
+      as_number: { get_input: as_number }
+      ip: { get_input: ip }
+    relationships:
+      - type: cloudify.relationships.connected_to
+        target: service
+
+capabilities:
+  service_resources:
+    value: { get_attribute: [service, object_references] }
+  service_endpoint_1_resources:
+    value: { get_attribute: [service_endpoint_1, object_references] }

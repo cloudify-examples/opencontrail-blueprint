@@ -1,0 +1,103 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.5/types.yaml
+  - plugin:cloudify-opencontrail-plugin
+
+
+inputs:
+  opencontrail_user:
+    type: string
+    default: { get_secret: opencontrail_user }
+
+  opencontrail_password:
+    type: string
+    default: { get_secret: opencontrail_password }
+
+  opencontrail_tenant:
+    type: string
+    default: { get_secret: opencontrail_tenant }
+
+  opencontrail_ip:
+    type: string
+    default: { get_secret: opencontrail_ip }
+
+  opencontrail_port:
+    type: string
+    default: { get_secret: opencontrail_port }
+
+  opencontrail_domain:
+    type: string
+    default: { get_secret: opencontrail_domain }
+
+  right_network_name:
+    type: string
+    default: right_net
+
+  left_network_name:
+    type: string
+    default: left_net
+
+  network_policy_name:
+    type: string
+    default: test_network_policy
+
+dsl_definitions:
+  api_configs: &api_configs
+    - user: { get_input: opencontrail_user }
+      password: { get_input: opencontrail_password }
+      tenant: { get_input: opencontrail_tenant }
+      ip: { get_input: opencontrail_ip }
+      port: { get_input: opencontrail_port }
+      domain: { get_input: opencontrail_domain }
+
+node_templates:
+
+  left_network:
+    type: cloudify.nodes.opencontrail.VirtualNetwork
+    properties:
+      api_configs: *api_configs
+      name: { get_input: left_network_name }
+      use_existing_resource: true
+
+  right_network:
+    type: cloudify.nodes.opencontrail.VirtualNetwork
+    properties:
+      api_configs: *api_configs
+      name: { get_input: right_network_name }
+      use_existing_resource: true
+
+  network_policy:
+    type: cloudify.nodes.opencontrail.NetworkPolicy
+    properties:
+      api_configs: *api_configs
+      name: { get_input: network_policy_name }
+      policy_rule_list:
+        - direction: "<>"
+          protocol: "any"
+          src_addresses:
+            - virtual_network: { get_attribute: [left_network, fq_name] }
+          src_ports:
+            - end_port: -1
+              start_port: -1
+          dst_addresses:
+            - virtual_network: { get_attribute: [right_network, fq_name] }
+          dst_ports:
+            - end_port: -1
+              start_port: -1
+          action_list:
+            simple_action: "pass"
+          ethertype: "IPv4"
+    relationships:
+      - type: cloudify.relationships.opencontrail.attatch_network_policy_to_network
+        target: left_network
+      - type: cloudify.relationships.opencontrail.attatch_network_policy_to_network
+        target: right_network
+
+capabilities:
+  network_policy:
+    value: { get_attribute: [network_policy, object_reference] }
+  left_network:
+    value: { get_attribute: [left_network, object_reference] }
+  right_network:
+    value: { get_attribute: [right_network, object_reference] }
